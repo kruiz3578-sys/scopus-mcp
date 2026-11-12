@@ -65,18 +65,29 @@ def get_with_retries(client, url, headers, params, tries=5):
 
 
 def fetch_all(client, query, max_results, view, headers, pause=0.3):
-    page_size = 25 if view == "COMPLETE" else 200
-    records, total, cursor = [], None, "*"
+    # Páginas de 25 y paginación por «start»: funciona con cualquier key
+    # (el parámetro «cursor» exige permisos que las keys básicas no tienen).
+    page_size = 25
+    records, total, start = [], None, 0
     quota = None
     while len(records) < max_results:
         params = {
             "query": query,
+            "start": start,
             "count": min(page_size, max_results - len(records)),
             "view": view,
             "sort": "-coverDate",
-            "cursor": cursor,
         }
         r = get_with_retries(client, f"{BASE}/search/scopus", headers, params)
+        if r.status_code == 401 and view == "COMPLETE" and not records:
+            print(
+                "AVISO: tu key no puede pedir la vista completa (resumen y palabras "
+                "clave). Continúo con la vista básica: esas dos columnas quedarán "
+                "vacías. Para llenarlas hace falta el institutional token "
+                "(SCOPUS_INSTTOKEN) o exportar el CSV desde la web de Scopus."
+            )
+            view = "STANDARD"
+            continue
         if r.status_code != 200:
             hint = ""
             if r.status_code in (401, 403):
@@ -96,10 +107,13 @@ def fetch_all(client, query, max_results, view, headers, pause=0.3):
             break
         records.extend(to_record(e) for e in entries)
         print(f"  descargados {len(records)} / {min(total, max_results)}")
-        nxt = (data.get("cursor") or {}).get("@next")
-        if not nxt or nxt == cursor:
+        start += len(entries)
+        if start >= total:
             break
-        cursor = nxt
+        if start >= 5000:
+            print("AVISO: Scopus limita a 5000 resultados por búsqueda; divide la "
+                  "ecuación por años (PUBYEAR) para descargar el resto.")
+            break
         time.sleep(pause)
     return records, total or 0, quota
 
@@ -212,7 +226,7 @@ def main():
     g.add_argument("--query-file", help="archivo de texto con la ecuación")
     p.add_argument("--filters", default="", help="texto para la columna «Filtros aplicados»")
     p.add_argument("--out", default="scopus_para_plantilla.xlsx")
-    p.add_argument("--max", type=int, default=2000, help="máximo de registros a descargar")
+    p.add_argument("--max", type=int, default=2000, help="máximo de registros a descargar (tope de Scopus: 5000)")
     p.add_argument("--no-abstracts", action="store_true")
     p.add_argument("--enrich", action="store_true")
     args = p.parse_args()

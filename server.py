@@ -80,19 +80,21 @@ async def scopus_search(
         "citations": "-citedby-count",
     }
     view = "COMPLETE" if include_abstract else "STANDARD"
-    page_size = min(max_results, 25 if include_abstract else 200)
+    # Páginas de 25 y paginación por «start»: funciona con cualquier key
+    # (el parámetro «cursor» exige permisos que las keys básicas no tienen).
+    page_size = 25
 
     results: list[dict] = []
     total = None
-    cursor = "*"
+    start = 0
     async with httpx.AsyncClient(timeout=30) as client:
         while len(results) < max_results:
             params = {
                 "query": query,
+                "start": start,
                 "count": min(page_size, max_results - len(results)),
                 "sort": sort_map.get(sort, "-relevancy"),
                 "view": view,
-                "cursor": cursor,
             }
             r = await client.get(f"{BASE}/search/scopus", headers=_headers(), params=params)
             if r.status_code != 200:
@@ -108,10 +110,9 @@ async def scopus_search(
             if not entries or (len(entries) == 1 and "error" in entries[0]):
                 break
             results.extend(to_record(e) for e in entries)
-            next_cursor = (data.get("cursor") or {}).get("@next")
-            if not next_cursor or next_cursor == cursor:
+            start += len(entries)
+            if start >= total or start >= 5000:
                 break
-            cursor = next_cursor
 
     return {
         "database": "Scopus",
