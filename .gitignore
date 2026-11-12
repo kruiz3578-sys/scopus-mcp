@@ -1,0 +1,5 @@
+*.xlsx
+.env.local
+__pycache__/
+venv/
+.claude/
